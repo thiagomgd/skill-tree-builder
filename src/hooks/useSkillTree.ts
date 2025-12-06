@@ -220,19 +220,36 @@ export function useSkillTree() {
           const dependentNode = nodeMap.get(dependentId);
           if (!dependentNode || !dependentNode.data.unlocked) continue;
 
-          const prerequisiteIds = getPrerequisiteIds(
+          // Check prerequisites BEFORE deletion to see if node originally had any
+          const originalPrerequisiteIds = getPrerequisiteIds(
+            dependentId,
+            edges
+          );
+          const remainingPrerequisiteIds = getPrerequisiteIds(
             dependentId,
             remainingEdges
           );
 
-          // If no prerequisites remain, it's a root node and can stay unlocked
-          if (prerequisiteIds.length === 0) continue;
+          // If node originally had prerequisites and now has none, lock it
+          // (it lost all its prerequisites and can't satisfy unlock requirements)
+          if (
+            originalPrerequisiteIds.length > 0 &&
+            remainingPrerequisiteIds.length === 0
+          ) {
+            nodesToLock.push(dependentId);
+            continue;
+          }
+
+          // If no prerequisites remain and it never had any, it's a root node - keep it unlocked
+          if (remainingPrerequisiteIds.length === 0) continue;
 
           // Check if all remaining prerequisites are unlocked
-          const allPrerequisitesUnlocked = prerequisiteIds.every((id) => {
-            const prereq = nodeMap.get(id);
-            return prereq?.data.unlocked === true;
-          });
+          const allPrerequisitesUnlocked = remainingPrerequisiteIds.every(
+            (id) => {
+              const prereq = nodeMap.get(id);
+              return prereq?.data.unlocked === true;
+            }
+          );
 
           if (!allPrerequisitesUnlocked) {
             nodesToLock.push(dependentId);
@@ -244,7 +261,7 @@ export function useSkillTree() {
         nds
           .filter((node) => node.id !== nodeId)
           .map((n) => {
-            if (nodesToLock.includes(n.id)) {
+            if (nodesToLock.indexOf(n.id) !== -1) {
               return {
                 ...n,
                 data: { ...n.data, unlocked: false },

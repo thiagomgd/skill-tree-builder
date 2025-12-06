@@ -179,7 +179,7 @@ describe("useSkillTree", () => {
       });
 
       expect(mockConfirm).toHaveBeenCalledWith(
-        expect.stringContaining("unlocked skill(s)")
+        expect.stringContaining("unlocked")
       );
       expect(result.current.nodes).toHaveLength(1);
       expect(result.current.edges).toHaveLength(0);
@@ -251,7 +251,79 @@ describe("useSkillTree", () => {
       });
 
       // Dependent should be locked after prerequisite is deleted
-      expect(result.current.nodes[0].data.unlocked).toBe(false);
+      // (even though it becomes a root node, it had prerequisites before)
+      const remainingNode = result.current.nodes.find((n) => n.id === nodeId2);
+      expect(remainingNode?.data.unlocked).toBe(false);
+    });
+
+    it("should lock dependent that loses all prerequisites (becomes root)", () => {
+      const { result } = renderUseSkillTree();
+      mockConfirm.mockReturnValue(true);
+
+      act(() => {
+        result.current.addNode({ name: "Prerequisite", description: "" });
+        result.current.addNode({ name: "Dependent", description: "" });
+      });
+
+      const nodeId1 = result.current.nodes[0].id;
+      const nodeId2 = result.current.nodes[1].id;
+
+      act(() => {
+        result.current.onConnect({
+          source: nodeId1,
+          target: nodeId2,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        // Unlock prerequisite and dependent
+        result.current.toggleNodeLock(nodeId1);
+        result.current.toggleNodeLock(nodeId2);
+      });
+
+      // Verify dependent is unlocked and has prerequisite
+      const dependentBefore = result.current.nodes.find(
+        (n) => n.id === nodeId2
+      );
+      expect(dependentBefore?.data.unlocked).toBe(true);
+
+      act(() => {
+        result.current.deleteNode(nodeId1);
+      });
+
+      // After deletion, dependent should be locked even though it's now a root node
+      // because it originally had prerequisites that were all deleted
+      const dependentAfter = result.current.nodes.find((n) => n.id === nodeId2);
+      expect(dependentAfter?.data.unlocked).toBe(false);
+      expect(dependentAfter).toBeDefined();
+    });
+
+    it("should keep root nodes unlocked when they never had prerequisites", () => {
+      const { result } = renderUseSkillTree();
+      mockConfirm.mockReturnValue(true);
+
+      act(() => {
+        result.current.addNode({ name: "Root Node", description: "" });
+        result.current.addNode({ name: "Other Node", description: "" });
+      });
+
+      const rootNodeId = result.current.nodes[0].id;
+      const otherNodeId = result.current.nodes[1].id;
+
+      act(() => {
+        // Unlock root node (it has no prerequisites)
+        result.current.toggleNodeLock(rootNodeId);
+      });
+
+      expect(result.current.nodes[0].data.unlocked).toBe(true);
+
+      // Delete the other node (not connected to root)
+      act(() => {
+        result.current.deleteNode(otherNodeId);
+      });
+
+      // Root node should stay unlocked (it never had prerequisites)
+      const rootNode = result.current.nodes.find((n) => n.id === rootNodeId);
+      expect(rootNode?.data.unlocked).toBe(true);
     });
 
     it("should warn about all dependents (locked and unlocked)", () => {

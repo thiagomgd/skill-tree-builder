@@ -16,6 +16,8 @@ To test with jest: `npm run test`
 
 Basic interactive skill tree builder, with cycle prevention.
 
+Cursor used during planning and execution of app + tests.
+
 ### To-Do
 
 Things that would be interesting to implement or improve as follow-up:
