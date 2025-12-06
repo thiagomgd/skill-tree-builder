@@ -30,6 +30,13 @@ Object.defineProperty(window, "localStorage", {
   value: localStorageMock,
 });
 
+// Mock window.confirm
+const mockConfirm = jest.fn();
+Object.defineProperty(window, "confirm", {
+  value: mockConfirm,
+  writable: true,
+});
+
 // Wrapper component that sets up the mock RF instance
 const wrapper = ({ children }: { children: React.ReactNode }) => {
   return React.createElement(ReactFlowProvider, null, children);
@@ -65,6 +72,7 @@ describe("useSkillTree", () => {
     localStorageMock.clear();
     jest.clearAllMocks();
     jest.clearAllTimers();
+    mockConfirm.mockReturnValue(true); // Default to allowing deletion
   });
 
   describe("Node Management", () => {
@@ -138,6 +146,183 @@ describe("useSkillTree", () => {
 
       expect(result.current.nodes).toHaveLength(1);
       expect(result.current.edges).toHaveLength(0);
+    });
+
+    it("should warn when deleting a node with unlocked dependents", () => {
+      const { result } = renderUseSkillTree();
+      mockConfirm.mockReturnValue(true);
+
+      act(() => {
+        result.current.addNode({ name: "Prerequisite", description: "" });
+        result.current.addNode({ name: "Dependent", description: "" });
+      });
+
+      const nodeId1 = result.current.nodes[0].id;
+      const nodeId2 = result.current.nodes[1].id;
+
+      act(() => {
+        result.current.onConnect({
+          source: nodeId1,
+          target: nodeId2,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        // Unlock both nodes
+        result.current.toggleNodeLock(nodeId1);
+        result.current.toggleNodeLock(nodeId2);
+      });
+
+      expect(result.current.nodes[1].data.unlocked).toBe(true);
+
+      act(() => {
+        result.current.deleteNode(nodeId1);
+      });
+
+      expect(mockConfirm).toHaveBeenCalledWith(
+        expect.stringContaining("unlocked skill(s)")
+      );
+      expect(result.current.nodes).toHaveLength(1);
+      expect(result.current.edges).toHaveLength(0);
+    });
+
+    it("should prevent deletion if user cancels confirmation", () => {
+      const { result } = renderUseSkillTree();
+      mockConfirm.mockReturnValue(false);
+
+      act(() => {
+        result.current.addNode({ name: "Prerequisite", description: "" });
+        result.current.addNode({ name: "Dependent", description: "" });
+      });
+
+      const nodeId1 = result.current.nodes[0].id;
+      const nodeId2 = result.current.nodes[1].id;
+
+      act(() => {
+        result.current.onConnect({
+          source: nodeId1,
+          target: nodeId2,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        result.current.toggleNodeLock(nodeId1);
+        result.current.toggleNodeLock(nodeId2);
+      });
+
+      const initialNodeCount = result.current.nodes.length;
+      const initialEdgeCount = result.current.edges.length;
+
+      act(() => {
+        result.current.deleteNode(nodeId1);
+      });
+
+      expect(mockConfirm).toHaveBeenCalled();
+      expect(result.current.nodes).toHaveLength(initialNodeCount);
+      expect(result.current.edges).toHaveLength(initialEdgeCount);
+    });
+
+    it("should cascade-lock unlocked dependents when prerequisite is deleted", () => {
+      const { result } = renderUseSkillTree();
+      mockConfirm.mockReturnValue(true);
+
+      act(() => {
+        result.current.addNode({ name: "Prerequisite", description: "" });
+        result.current.addNode({ name: "Dependent", description: "" });
+      });
+
+      const nodeId1 = result.current.nodes[0].id;
+      const nodeId2 = result.current.nodes[1].id;
+
+      act(() => {
+        result.current.onConnect({
+          source: nodeId1,
+          target: nodeId2,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        // Unlock prerequisite and dependent
+        result.current.toggleNodeLock(nodeId1);
+        result.current.toggleNodeLock(nodeId2);
+      });
+
+      expect(result.current.nodes[1].data.unlocked).toBe(true);
+
+      act(() => {
+        result.current.deleteNode(nodeId1);
+      });
+
+      // Dependent should be locked after prerequisite is deleted
+      expect(result.current.nodes[0].data.unlocked).toBe(false);
+    });
+
+    it("should warn about all dependents (locked and unlocked)", () => {
+      const { result } = renderUseSkillTree();
+      mockConfirm.mockReturnValue(true);
+
+      act(() => {
+        result.current.addNode({ name: "Prerequisite", description: "" });
+        result.current.addNode({ name: "Unlocked Dependent", description: "" });
+        result.current.addNode({ name: "Locked Dependent", description: "" });
+      });
+
+      const nodeId1 = result.current.nodes[0].id;
+      const nodeId2 = result.current.nodes[1].id;
+      const nodeId3 = result.current.nodes[2].id;
+
+      act(() => {
+        result.current.onConnect({
+          source: nodeId1,
+          target: nodeId2,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        result.current.onConnect({
+          source: nodeId1,
+          target: nodeId3,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        // Unlock prerequisite and one dependent
+        result.current.toggleNodeLock(nodeId1);
+        result.current.toggleNodeLock(nodeId2);
+      });
+
+      act(() => {
+        result.current.deleteNode(nodeId1);
+      });
+
+      expect(mockConfirm).toHaveBeenCalledWith(
+        expect.stringMatching(/2 skill\(s\)/)
+      );
+      expect(mockConfirm).toHaveBeenCalledWith(
+        expect.stringMatching(/unlocked/)
+      );
+      expect(mockConfirm).toHaveBeenCalledWith(expect.stringMatching(/locked/));
+    });
+
+    it("should warn when deleting a node that is being edited", () => {
+      const { result } = renderUseSkillTree();
+      mockConfirm.mockReturnValue(true);
+
+      act(() => {
+        result.current.addNode({ name: "Test Node", description: "" });
+      });
+
+      const nodeId = result.current.nodes[0].id;
+
+      act(() => {
+        result.current.setEditingNodeId(nodeId);
+      });
+
+      expect(result.current.editingNode?.id).toBe(nodeId);
+
+      act(() => {
+        result.current.deleteNode(nodeId);
+      });
+
+      expect(mockConfirm).toHaveBeenCalledWith(
+        expect.stringContaining("currently being edited")
+      );
+      expect(result.current.editingNode).toBeNull();
     });
   });
 

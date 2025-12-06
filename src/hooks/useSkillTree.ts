@@ -160,15 +160,106 @@ export function useSkillTree() {
 
   const deleteNode = useCallback(
     (nodeId: string) => {
-      setNodes((nds) => nds.filter((node) => node.id !== nodeId));
-      setEdges((eds) =>
-        eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
+      const node = nodeMap.get(nodeId);
+      if (!node) return;
+
+      // Check if node is currently being edited
+      if (editingNodeId === nodeId) {
+        if (
+          !confirm(
+            `"${node.data.name}" is currently being edited. Delete anyway?`
+          )
+        ) {
+          return;
+        }
+      }
+
+      // Check for dependents that would be affected
+      const dependentIds = getDependentIds(nodeId, edges);
+      const unlockedDependents = dependentIds.filter(
+        (id) => nodeMap.get(id)?.data.unlocked === true
       );
+      const lockedDependents = dependentIds.filter(
+        (id) => nodeMap.get(id)?.data.unlocked !== true
+      );
+
+      if (dependentIds.length > 0) {
+        const unlockedNames = unlockedDependents
+          .map((id) => nodeMap.get(id)?.data.name)
+          .filter(Boolean);
+        const lockedNames = lockedDependents
+          .map((id) => nodeMap.get(id)?.data.name)
+          .filter(Boolean);
+
+        let message = `"${node.data.name}" is a prerequisite for ${dependentIds.length} skill(s).\n\n`;
+
+        if (unlockedDependents.length > 0) {
+          message += `⚠️ ${unlockedDependents.length} unlocked: ${unlockedNames.join(", ")}\n`;
+        }
+        if (lockedDependents.length > 0) {
+          message += `🔒 ${lockedDependents.length} locked: ${lockedNames.join(", ")}\n`;
+        }
+
+        message +=
+          "\nDeleting will remove these connections and may affect unlock requirements.\n\nDo you want to proceed?";
+
+        if (!confirm(message)) {
+          return;
+        }
+      }
+
+      const remainingEdges = edges.filter(
+        (edge) => edge.source !== nodeId && edge.target !== nodeId
+      );
+
+      // Check which unlocked dependents should be locked after deletion
+      // (if they no longer meet their unlock requirements)
+      const nodesToLock: string[] = [];
+      if (unlockedDependents.length > 0) {
+        for (const dependentId of unlockedDependents) {
+          const dependentNode = nodeMap.get(dependentId);
+          if (!dependentNode || !dependentNode.data.unlocked) continue;
+
+          const prerequisiteIds = getPrerequisiteIds(
+            dependentId,
+            remainingEdges
+          );
+
+          // If no prerequisites remain, it's a root node and can stay unlocked
+          if (prerequisiteIds.length === 0) continue;
+
+          // Check if all remaining prerequisites are unlocked
+          const allPrerequisitesUnlocked = prerequisiteIds.every((id) => {
+            const prereq = nodeMap.get(id);
+            return prereq?.data.unlocked === true;
+          });
+
+          if (!allPrerequisitesUnlocked) {
+            nodesToLock.push(dependentId);
+          }
+        }
+      }
+
+      setNodes((nds) =>
+        nds
+          .filter((node) => node.id !== nodeId)
+          .map((n) => {
+            if (nodesToLock.includes(n.id)) {
+              return {
+                ...n,
+                data: { ...n.data, unlocked: false },
+              };
+            }
+            return n;
+          })
+      );
+      setEdges(remainingEdges);
+
       if (editingNodeId === nodeId) {
         setEditingNodeId(null);
       }
     },
-    [setNodes, setEdges, editingNodeId]
+    [setNodes, setEdges, editingNodeId, edges, nodeMap]
   );
 
   const canUnlock = useCallback(
