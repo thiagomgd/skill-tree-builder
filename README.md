@@ -14,6 +14,8 @@ To test with jest: `npm run test`
 
 ## Notes
 
+Basic interactive skill tree builder, with cycle prevention.
+
 ### To-Do
 
 Things that would be interesting to implement or improve as follow-up:
